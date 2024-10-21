@@ -66,7 +66,7 @@ class TrajectroyFollower(Node):
         self.yaw_output = 0.0 # current yaw out
         self.yaw_output_1 = 0.0 # last yaw out
 
-        self.fact_conv = 111,139
+        self.fact_conv = 111139
 
         # limits for window detection
         self.lim_rad = 1
@@ -103,16 +103,15 @@ class TrajectroyFollower(Node):
     """
 
     def vehicle_global_position(self, msg):
+        # self.get_logger().info(f"Latitud recibida: {msg.lat}, tipo: {type(msg.lat)}")
+        # self.get_logger().info(f"Factor de conversión: {self.fact_conv}")
         # latitud y longitud actual
-        self.x = msg.pose.position.x*self.fact_conv
-        self.y = msg.pose.position.y*self.fact_conv
+        self.x = msg.lat*self.fact_conv
+        self.y = msg.lon*self.fact_conv
     
     def vehicle_local_position(self, msg):
         # orientacion actual
-        self.q1 = msg.poses.orientation
-        _, _, angle = self.euler_from_quaternion(self.q1)
-        angle = math.degrees(angle)
-        self.yaw = angle
+        self.yaw = msg.heading
 
     def control(self):
         msg = TwistStamped()
@@ -174,10 +173,6 @@ class TrajectroyFollower(Node):
             self.y_output = vel_y / norm_vel
             self.yaw_output = vel_yaw 
 
-            msg.twist.linear.x = self.x_output
-            msg.twist.linear.y = self.y_output
-            msg.twist.angular.z = self.yaw_output
-
             self.x_1 = self.x # last x
             self.x_output_1 = self.x_output # last x out
 
@@ -187,10 +182,12 @@ class TrajectroyFollower(Node):
             self.yaw_1 = self.yaw # last yaw
             self.yaw_output_1 = self.yaw_output # last yaw out
 
-            self.get_logger().info("Velocity published:")
-            self.get_logger().info(f"x={self.x_output}, y={self.y_output}, yaw={self.yaw_output}")
+        msg.twist.linear.x = self.x_output
+        msg.twist.linear.y = self.y_output
+        msg.twist.angular.z = self.yaw_output
+        self.get_logger().info(f"Velocity published: x={self.x_output}, y={self.y_output}, yaw={self.yaw_output}")
 
-            self.vel_pub.publish(msg)
+        self.vel_pub.publish(msg)
 
     def euler_from_quaternion(self, quaternion):
         x = quaternion.x
