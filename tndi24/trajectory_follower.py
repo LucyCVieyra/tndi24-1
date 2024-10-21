@@ -22,18 +22,20 @@ class TrajectroyFollower(Node):
         )
 
         # self.window_sub = self.create_subscription(WindowDetection, "/window_detections", self.window_callback, 10)
-        self.path_sub = self.create_subscription(Path, "/path_plan", self.path_callback, 10)
+        # self.path_sub = self.create_subscription(Path, "/path_plan", self.path_callback, 10)
         self.local_sub = self.create_subscription(VehicleLocalPosition, "/fmu/out/vehicle_local_position", self.vehicle_local_position, qos_profile)
         self.globa_sub = self.create_subscription(VehicleGlobalPosition, "/fmu/out/vehicle_global_position", self.vehicle_global_position, qos_profile)
 
         self.vel_pub = self.create_publisher(TwistStamped, "/px4_driver/cmd_vel/Path", 10)
         
+        self.position = VehicleGlobalPosition()
+
         # X variables
         self.px_gain = 0.3
         self.dx_gain = 0.03
         self.nx_filter = 0.03
         self.x = 0.0 # current x
-        self.x_goal = 0.0 # next x
+        self.x_goal = 100.0 # next x
         self.x_error = 0.0
         self.x_error_1 = 0.0
         self.x_1 = 0.0 # last x
@@ -45,7 +47,7 @@ class TrajectroyFollower(Node):
         self.dy_gain = 0.03
         self.ny_filter = 0.03
         self.y = 0.0 # current y
-        self.y_goal = 0.0 # next y
+        self.y_goal = 100.0 # next y
         self.y_error = 0.0
         self.y_error_1 = 0.0
         self.y_1 = 0.0 # last y
@@ -64,8 +66,7 @@ class TrajectroyFollower(Node):
         self.yaw_output = 0.0 # current yaw out
         self.yaw_output_1 = 0.0 # last yaw out
 
-        self.max_vel = 0.5
-        self.max_vel_yaw = 10.0
+        self.fact_conv = 111,139
 
         # limits for window detection
         self.lim_rad = 1
@@ -91,25 +92,24 @@ class TrajectroyFollower(Node):
                     break
                 else:
                     self.window_flag = 0
-    """
     
     def path_callback(self, msg):
-        self.x_goal = msg.poses.position.x # lat
-        self.y_goal = msg.poses.position.y # long
+        self.x_goal = msg.poses.position.x*self.fact_conv # lat
+        self.y_goal = msg.poses.position.y*self.fact_conv # long
         self.q2 = msg.pose.orientation
         _, _, angle = self.euler_from_quaternion(self.q2)
         angle = math.degrees(angle)
         self.yaw_goal = angle
-
+    """
 
     def vehicle_global_position(self, msg):
         # latitud y longitud actual
-        self.x = msg.poses.position.x
-        self.y = msg.pose.position.y
+        self.x = msg.pose.position.x*self.fact_conv
+        self.y = msg.pose.position.y*self.fact_conv
     
     def vehicle_local_position(self, msg):
         # orientacion actual
-        self.q1 = msg.pose.orientation
+        self.q1 = msg.poses.orientation
         _, _, angle = self.euler_from_quaternion(self.q1)
         angle = math.degrees(angle)
         self.yaw = angle
@@ -122,6 +122,10 @@ class TrajectroyFollower(Node):
         self.y_error = self.y_goal - self.y
         self.yaw_error = self.yaw_goal - self.yaw
 
+        vel_x = 1.0
+        vel_y = 1.0
+        vel_yaw = 1.0
+
         self.get_logger().info(f"Erores: x={self.x_error}, y={self.y_error}, yaw={self.yaw_error}")
 
         # Control PD en X y Y 
@@ -133,8 +137,8 @@ class TrajectroyFollower(Node):
             vel_x = float(px_action + dx_action)
 
         else:
-            self.x_error = 0.0
-            self.x_output = 0.0
+            vel_x = 0
+            self.x_output = 0
 
 
         if (abs(self.y_error) < self.lim_rad):
@@ -145,8 +149,7 @@ class TrajectroyFollower(Node):
             vel_y = float(py_action + dy_action)
 
         else:
-            self.y_error = 0.0
-            self.y_output = 0.0
+            self.y_output = 0
 
 
         if abs(self.yaw_error) > self.lim_yaw:
@@ -157,35 +160,37 @@ class TrajectroyFollower(Node):
             vel_yaw = float(pyaw_action + dyaw_action)
 
         else:
-            self.yaw_output = 0.0
-            self.yaw_error = 0.0
+            self.yaw_output = 0
 
         if abs(self.x_error) <= self.lim_rad and abs(self.y_error) <= self.lim_rad and abs(self.yaw_error) <= self.lim_yaw:
-            self.get_logger().info("Vehicle is near to the window detected")
+            self.get_logger().info("Vehicle is near to the next point")
+            self.x_output = 0.0
+            self.y_output = 0.0
+            self.yaw_output = 0.0
             
-        norm_vel = math.sqrt((vel_x**2) + (vel_y**2))
-        
-        self.x_output = vel_x / norm_vel
-        self.y_output = vel_y / norm_vel
-        self.yaw = vel_yaw 
+        else:
+            norm_vel = math.sqrt((vel_x**2) + (vel_y**2))
+            self.x_output = vel_x / norm_vel
+            self.y_output = vel_y / norm_vel
+            self.yaw_output = vel_yaw 
 
-        msg.linear.x = self.x_output
-        msg.linear.y = self.y_output
-        msg.angular.z = self.yaw_output
+            msg.twist.linear.x = self.x_output
+            msg.twist.linear.y = self.y_output
+            msg.twist.angular.z = self.yaw_output
 
-        self.x_1 = self.x # last x
-        self.x_output_1 = self.x_output # last x out
+            self.x_1 = self.x # last x
+            self.x_output_1 = self.x_output # last x out
 
-        self.y_1 = self.y # last y
-        self.y_output_1 = self.y_output # last y out
+            self.y_1 = self.y # last y
+            self.y_output_1 = self.y_output # last y out
 
-        self.yaw_1 = self.yaw # last yaw
-        self.yaw_output_1 = self.yaw_output # last yaw out
+            self.yaw_1 = self.yaw # last yaw
+            self.yaw_output_1 = self.yaw_output # last yaw out
 
-        self.get_logger().info("Velocity published:")
-        self.get_logger().info(f"x={self.x_output}, y={self.y_output}, yaw={self.yaw_output}")
+            self.get_logger().info("Velocity published:")
+            self.get_logger().info(f"x={self.x_output}, y={self.y_output}, yaw={self.yaw_output}")
 
-        self.vel_pub.publish(msg)
+            self.vel_pub.publish(msg)
 
     def euler_from_quaternion(self, quaternion):
         x = quaternion.x
